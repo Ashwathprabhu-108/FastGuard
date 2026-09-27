@@ -1,0 +1,73 @@
+# =============================================================================
+# FastGuard — Breaking-Change CI Gate
+# =============================================================================
+# Automatically analyses every Pull Request targeting `main` for breaking
+# API-contract changes in FastAPI applications using structural AST diffing
+# and a pre-trained ML classifier.
+#
+# Exit behaviour:
+#   - exit 0  →  PR is safe, check passes  ✔
+#   - exit 1  →  Potential breaking change detected, check fails  ✖
+# =============================================================================
+
+name: FastGuard Breaking-Change Gate
+
+# -----------------------------------------------------------------------------
+# 1. Trigger: Run on every pull request targeting the main branch
+# -----------------------------------------------------------------------------
+on:
+  pull_request:
+    branches:
+      - main
+
+# -----------------------------------------------------------------------------
+# 2. Permissions: Read-only access to repository contents
+# -----------------------------------------------------------------------------
+permissions:
+  contents: read
+
+# -----------------------------------------------------------------------------
+# 3. Job Definition
+# -----------------------------------------------------------------------------
+jobs:
+  fastguard-analysis:
+    name: "⚡ FastGuard Analysis"
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 3a. Checkout with FULL history
+      #     fetch-depth: 0  ensures `git diff origin/main...HEAD` has access
+      #     to the complete commit graph (shallow clones break the diff).
+      # -----------------------------------------------------------------------
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # 3b. Set up Python 3.10
+      # -----------------------------------------------------------------------
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      # -----------------------------------------------------------------------
+      # 3c. Install minimal runtime dependencies
+      #     Only the packages needed by fastguard_cli.py and the serialised
+      #     model — no dev/test extras to keep the CI step fast.
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas scikit-learn joblib
+
+      # -----------------------------------------------------------------------
+      # 3d. Run FastGuard breaking-change analysis
+      #     Diffs origin/main against the PR head commit and exits with
+      #     code 1 if the ML model flags a potential breaking change.
+      # -----------------------------------------------------------------------
+      - name: Run FastGuard CLI
+        run: |
+          python fastguard_cli.py --base origin/main --head HEAD
