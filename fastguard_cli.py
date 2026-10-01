@@ -14,12 +14,12 @@ Pipeline:
      10 structural AST-delta features used during model training.
   4. Load `fastguard_model.pkl` (serialised via joblib) and call
      `predict_proba()` on the aggregated feature vector.
-  5. Apply the OOF-tuned operating threshold (0.4456) to produce a
+  5. Apply the decision threshold (0.50) to produce a
      binary PASS / FAIL decision.
 
 Exit codes:
-  0 — PR is safe (probability < threshold)
-  1 — PR is potentially breaking (probability >= threshold)
+  0 — PR is safe (probability < 0.50)
+  1 — PR is potentially breaking (probability >= 0.50)
 
 Usage (local):
     python fastguard_cli.py --base origin/main --head HEAD
@@ -58,8 +58,8 @@ AST_FEATURE_COLS: list[str] = [
     "routes_param_default_changed_count",
 ]
 
-# OOF-tuned operating threshold (maximising Macro F1 on training set).
-DECISION_THRESHOLD: float = 0.4456
+# Decision threshold — flag as breaking when P(breaking) >= 0.50.
+DECISION_THRESHOLD: float = 0.50
 
 # Default model artefact location (same directory as this script).
 DEFAULT_MODEL_PATH: str = os.path.join(
@@ -509,10 +509,44 @@ def print_report(
     print(_format_feature_table(aggregated_deltas))
     print()
 
+    # ----- Structured AST mutations report -----
+    non_zero = {k: v for k, v in aggregated_deltas.items() if v != 0}
+    if non_zero:
+        print(f"{_CYAN}Detected AST mutations:{_RESET}")
+        # Type changes
+        if aggregated_deltas.get("fields_type_changed_count", 0) > 0:
+            print(f"  • Type changes: {aggregated_deltas['fields_type_changed_count']} field(s) had their type annotation modified")
+        if aggregated_deltas.get("routes_param_type_changed_count", 0) > 0:
+            print(f"  • Route param type changes: {aggregated_deltas['routes_param_type_changed_count']} route parameter(s) changed type")
+        # Field removals
+        if aggregated_deltas.get("fields_removed_count", 0) > 0:
+            print(f"  • Field removals: {aggregated_deltas['fields_removed_count']} Pydantic model field(s) removed")
+        # Field additions
+        if aggregated_deltas.get("fields_added_count", 0) > 0:
+            print(f"  • Field additions: {aggregated_deltas['fields_added_count']} Pydantic model field(s) added")
+        # Default changes
+        if aggregated_deltas.get("fields_default_changed_count", 0) > 0:
+            print(f"  • Default changes: {aggregated_deltas['fields_default_changed_count']} field default(s) modified")
+        if aggregated_deltas.get("routes_param_default_changed_count", 0) > 0:
+            print(f"  • Route param default changes: {aggregated_deltas['routes_param_default_changed_count']} route parameter default(s) modified")
+        # Model renames
+        if aggregated_deltas.get("models_renamed_count", 0) > 0:
+            print(f"  • Model renames: {aggregated_deltas['models_renamed_count']} Pydantic model(s) renamed")
+        # Endpoint route updates
+        if aggregated_deltas.get("routes_removed_count", 0) > 0:
+            print(f"  • Endpoint removals: {aggregated_deltas['routes_removed_count']} route(s) removed")
+        if aggregated_deltas.get("routes_added_count", 0) > 0:
+            print(f"  • Endpoint additions: {aggregated_deltas['routes_added_count']} route(s) added")
+        if aggregated_deltas.get("routes_param_changed_count", 0) > 0:
+            print(f"  • Route param changes: {aggregated_deltas['routes_param_changed_count']} route parameter(s) added/removed")
+        print()
+
     # Inference result
     print(f"{_CYAN}Model inference:{_RESET}")
     print(f"  Breaking probability : {probability:.4f}")
     print(f"  Decision threshold   : {threshold:.4f}")
+    # Machine-parseable probability line for programmatic consumption
+    print(f"Probability: {probability:.4f}")
     print()
 
     if is_breaking:
@@ -521,7 +555,6 @@ def print_report(
         print(f"{_RED}{_BOLD}{'─' * 62}{_RESET}")
         print()
         print(f"{_YELLOW}  The following structural changes contributed to this signal:{_RESET}")
-        non_zero = {k: v for k, v in aggregated_deltas.items() if v != 0}
         if non_zero:
             for feat, count in non_zero.items():
                 print(f"    ⚠  {feat} = {count}")
